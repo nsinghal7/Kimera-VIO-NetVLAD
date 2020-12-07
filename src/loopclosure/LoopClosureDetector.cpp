@@ -96,6 +96,9 @@ LoopClosureDetector::LoopClosureDetector(
   // Initialize our feature matching object:
   orb_feature_matcher_ =
       cv::DescriptorMatcher::create(lcd_params_.matcher_type_);
+  
+  // Initialize the thirdparty wrapper:
+    lcd_tp_wrapper_ = VIO::make_unique<LcdThirdPartyWrapper>(lcd_params_);
 
   if(FLAGS_use_netvlad) {
     db_vlad_ = VIO::make_unique<cpp_netvlad::NetVLAD>(FLAGS_netvlad_path);
@@ -111,9 +114,6 @@ LoopClosureDetector::LoopClosureDetector(
               << FLAGS_vocabulary_path;
     vocab.load(FLAGS_vocabulary_path);
     LOG(INFO) << "Loaded vocabulary with " << vocab.size() << " visual words.";
-
-    // Initialize the thirdparty wrapper:
-    lcd_tp_wrapper_ = VIO::make_unique<LcdThirdPartyWrapper>(lcd_params_);
 
     // Initialize db_BoW_:
     db_BoW_ = VIO::make_unique<OrbDatabase>(vocab);
@@ -351,11 +351,9 @@ bool LoopClosureDetector::detectLoop(const StereoFrame& stereo_frame,
       } else {
         // Set best candidate to highest scorer.
         result->match_id_ = query_result[0].Id;
-
         // Compute islands in the matches.
         std::vector<MatchIsland> islands;
         lcd_tp_wrapper_->computeIslands(&query_result, &islands);
-
         if (islands.empty()) {
           result->status_ = LCDStatus::NO_GROUPS;
         } else {
@@ -366,7 +364,6 @@ bool LoopClosureDetector::detectLoop(const StereoFrame& stereo_frame,
           // Run temporal constraint check on this best island.
           bool pass_temporal_constraint =
               lcd_tp_wrapper_->checkTemporalConstraint(frame_id, best_island);
-
           if (!pass_temporal_constraint) {
             result->status_ = LCDStatus::FAILED_TEMPORAL_CONSTRAINT;
           } else {

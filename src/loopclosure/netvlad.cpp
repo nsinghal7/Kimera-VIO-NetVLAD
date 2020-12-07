@@ -9,11 +9,13 @@
 namespace cpp_netvlad {
 
 constexpr int FULL_VECTOR_SIZE = 32768;
+constexpr auto DTYPE = at::kFloat;
 
 NetVLAD::NetVLAD(std::string checkpoint_path) {
   try {
     // Load TorchScript trace of PyTorch implementation of NetVLAD based on https://github.com/Nanne/pytorch-NetVlad
     script_net_ = torch::jit::load(checkpoint_path);
+    script_net_.to(DTYPE); // conversion probably not necessary, but will avoid errors
   } catch (const c10::Error& e) {
     LOG(FATAL) << "Failed to load NetVLAD model.";
   }
@@ -26,13 +28,13 @@ void NetVLAD::transform(const cv::Mat& img, at::Tensor& rep) {
   // Interprets the raw mono8 image data as a 1xRxC matrix of bytes (uint8)
   // Source: https://github.com/pytorch/pytorch/issues/12506#issuecomment-429573396
   at::Tensor tensor_img = torch::from_blob(img.data, {img.channels(), img.rows, img.cols}, at::TensorOptions(at::kByte));
-  tensor_img = tensor_img.to(at::kDouble);
+  tensor_img = tensor_img.to(DTYPE); // Matching model
   // Expand to (1, 3, R, C) to pretend we have a color image with batch size 1.
   // This was included in the training/testing code, but I haven't seen examples of its use, so performance is unclear
   tensor_img = tensor_img.expand({1, 3, -1, -1});
   // Normalize the image based on constants from https://github.com/Nanne/pytorch-NetVlad/blob/master/pittsburgh.py input_transform()
-  tensor_img = (tensor_img/255. - at::tensor({0.485, 0.456, 0.406}).expand({1, 1, 1, 3}).permute({0, 3, 1, 2}))
-                 / at::tensor({0.229, 0.224, 0.225}).expand({1, 1, 1, 3}).permute({0, 3, 1, 2});
+  tensor_img = (tensor_img/255.f - at::tensor({0.485, 0.456, 0.406}).to(DTYPE).expand({1, 1, 1, 3}).permute({0, 3, 1, 2}))
+                 / at::tensor({0.229, 0.224, 0.225}).to(DTYPE).expand({1, 1, 1, 3}).permute({0, 3, 1, 2});
   inputs.push_back(tensor_img);
 
   // Run NetVLAD
@@ -78,11 +80,11 @@ double NetVLAD::score(const at::Tensor& rep1, const at::Tensor& rep2) const {
     LOG(FATAL) << "NetVLAD::score had vector inputs of different sizes: " << rep1.size(0) << " " << rep2.size(0);
   }
   const double norm = (rep1 - rep2).norm().item<double>();
-  if(norm > 0) {
+  if(norm > 2) {
     LOG(WARNING) << "NetVLAD::score had large norm: " << norm << " from inputs with norms: "
                  << rep1.norm().item<double>() << " " << rep2.norm().item<double>();
   }
-  return std::max(norm, 0.);
+  return std::max(1 - norm/2., 0.);
 }
 
 } // namespace cpp_netvlad
