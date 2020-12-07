@@ -39,6 +39,12 @@
 DEFINE_string(vocabulary_path,
               "../vocabulary/ORBvoc.yml",
               "Path to BoW vocabulary file for LoopClosureDetector module.");
+DEFINE_string(netvlad_path,
+              "",
+              "Path to NetVLAD checkpoint for LoopClosureDetector module.");
+DEFINE_bool(use_netvlad,
+            false,
+            "Use NetVLAD for place recognition instead of DBoW2.");
 
 /** Verbosity settings: (cumulative with every increase in level)
       0: Runtime errors and warnings, spin start and frequency are reported.
@@ -60,10 +66,12 @@ LoopClosureDetector::LoopClosureDetector(
       orb_feature_detector_(),
       orb_feature_matcher_(),
       db_BoW_(nullptr),
+      db_vlad_(nullptr),
       db_frames_(),
       timestamp_map_(),
       lcd_tp_wrapper_(nullptr),
       latest_bowvec_(),
+      latest_vlad_(),
       B_Pose_camLrect_(),
       pgo_(nullptr),
       W_Pose_Blkf_estimates_(),
@@ -89,23 +97,27 @@ LoopClosureDetector::LoopClosureDetector(
   orb_feature_matcher_ =
       cv::DescriptorMatcher::create(lcd_params_.matcher_type_);
 
-  // Load ORB vocabulary:
-  std::ifstream f_vocab(FLAGS_vocabulary_path.c_str());
-  CHECK(f_vocab.good()) << "LoopClosureDetector: Incorrect vocabulary path: "
-                        << FLAGS_vocabulary_path;
-  f_vocab.close();
+  if(FLAGS_use_netvlad) {
+    db_vlad_ = VIO::make_unique<cpp_netvlad::NetVLAD>(FLAGS_netvlad_path);
+  } else {
+    // Load ORB vocabulary:
+    std::ifstream f_vocab(FLAGS_vocabulary_path.c_str());
+    CHECK(f_vocab.good()) << "LoopClosureDetector: Incorrect vocabulary path: "
+                          << FLAGS_vocabulary_path;
+    f_vocab.close();
 
-  OrbVocabulary vocab;
-  LOG(INFO) << "LoopClosureDetector:: Loading vocabulary from "
-            << FLAGS_vocabulary_path;
-  vocab.load(FLAGS_vocabulary_path);
-  LOG(INFO) << "Loaded vocabulary with " << vocab.size() << " visual words.";
+    OrbVocabulary vocab;
+    LOG(INFO) << "LoopClosureDetector:: Loading vocabulary from "
+              << FLAGS_vocabulary_path;
+    vocab.load(FLAGS_vocabulary_path);
+    LOG(INFO) << "Loaded vocabulary with " << vocab.size() << " visual words.";
 
-  // Initialize the thirdparty wrapper:
-  lcd_tp_wrapper_ = VIO::make_unique<LcdThirdPartyWrapper>(lcd_params_);
+    // Initialize the thirdparty wrapper:
+    lcd_tp_wrapper_ = VIO::make_unique<LcdThirdPartyWrapper>(lcd_params_);
 
-  // Initialize db_BoW_:
-  db_BoW_ = VIO::make_unique<OrbDatabase>(vocab);
+    // Initialize db_BoW_:
+    db_BoW_ = VIO::make_unique<OrbDatabase>(vocab);
+  }
 
   // Initialize pgo_:
   // TODO(marcus): parametrize the verbosity of PGO params
@@ -278,31 +290,46 @@ bool LoopClosureDetector::detectLoop(const StereoFrame& stereo_frame,
   FrameId frame_id = processAndAddFrame(stereo_frame);
   result->query_id_ = frame_id;
 
-  // Create BOW representation of descriptors.
-  DBoW2::BowVector bow_vec;
-  DCHECK(db_BoW_);
-  db_BoW_->getVocabulary()->transform(db_frames_[frame_id].descriptors_vec_,
-                                      bow_vec);
-
   int max_possible_match_id = frame_id - lcd_params_.dist_local_;
   if (max_possible_match_id < 0) max_possible_match_id = 0;
 
-  // Query for BoW vector matches in database.
   DBoW2::QueryResults query_result;
-  db_BoW_->query(bow_vec,
-                 query_result,
-                 lcd_params_.max_db_results_,
-                 max_possible_match_id);
+  DBoW2::BowVector bow_vec;
+  at::Tensor vlad;
 
-  // Add current BoW vector to database.
-  db_BoW_->add(bow_vec);
+  if(FLAGS_use_netvlad) {
+    DCHECK(db_vlad_);
+    db_vlad_->transform(stereo_frame.getLeftFrame().img_, vlad);
+    db_vlad_->query(vlad,
+                    query_result,
+                    lcd_params_.max_db_results_,
+                    max_possible_match_id);
+    db_vlad_->add(vlad);
+  } else {
+    // Create BOW representation of descriptors.
+    DCHECK(db_BoW_);
+    db_BoW_->getVocabulary()->transform(db_frames_[frame_id].descriptors_vec_,
+                                        bow_vec);
+    // Query for BoW vector matches in database.
+    db_BoW_->query(bow_vec,
+                  query_result,
+                  lcd_params_.max_db_results_,
+                  max_possible_match_id);
+
+    // Add current BoW vector to database.
+    db_BoW_->add(bow_vec);
+  }
 
   if (query_result.empty()) {
     result->status_ = LCDStatus::NO_MATCHES;
   } else {
     double nss_factor = 1.0;
     if (lcd_params_.use_nss_) {
-      nss_factor = db_BoW_->getVocabulary()->score(bow_vec, latest_bowvec_);
+      if(FLAGS_use_netvlad) {
+        nss_factor = db_vlad_->score(vlad, latest_vlad_);
+      } else {
+        nss_factor = db_BoW_->getVocabulary()->score(bow_vec, latest_bowvec_);
+      }
     }
 
     if (lcd_params_.use_nss_ && nss_factor < lcd_params_.min_nss_factor_) {
@@ -373,7 +400,11 @@ bool LoopClosureDetector::detectLoop(const StereoFrame& stereo_frame,
 
   // Update latest bowvec for normalized similarity scoring (NSS).
   if (static_cast<int>(frame_id + 1) > lcd_params_.dist_local_) {
-    latest_bowvec_ = bow_vec;
+    if(FLAGS_use_netvlad) {
+      latest_vlad_ = vlad;
+    } else {
+      latest_bowvec_ = bow_vec;
+    }
   } else {
     VLOG(3) << "LoopClosureDetector: Not enough frames processed.";
   }
@@ -495,11 +526,19 @@ void LoopClosureDetector::setIntrinsics(const StereoFrame& stereo_frame) {
 
 /* ------------------------------------------------------------------------ */
 void LoopClosureDetector::setDatabase(const OrbDatabase& db) {
+  if(FLAGS_use_netvlad) {
+    LOG(WARNING) <<
+          "LoopClosureDetector::setDatabase called while running with vlad!";
+  }
   db_BoW_ = VIO::make_unique<OrbDatabase>(db);
 }
 
 /* ------------------------------------------------------------------------ */
 void LoopClosureDetector::setVocabulary(const OrbVocabulary& voc) {
+  if(FLAGS_use_netvlad) {
+    LOG(WARNING) <<
+          "LoopClosureDetector::setVocabulary called while running with vlad!";
+  }
   db_BoW_->setVocabulary(voc);
 }
 

@@ -34,6 +34,7 @@ find_package(Glog 0.3.5 REQUIRED)
 find_package(GTSAM REQUIRED)
 find_package(opengv REQUIRED)
 find_package(OpenCV REQUIRED)
+find_package(Torch REQUIRED)
 find_package(DBoW2 REQUIRED)
 if(NOT TARGET DBoW2::DBoW2)
   add_library(DBoW2::DBoW2 INTERFACE IMPORTED)
@@ -130,6 +131,7 @@ target_link_libraries(${PROJECT_NAME}
     ${GLOG_LIBRARIES}
     gtsam
     gtsam_unstable
+    ${TORCH_LIBRARIES}
  )
 target_include_directories(${PROJECT_NAME}
   PUBLIC
@@ -139,12 +141,16 @@ target_include_directories(${PROJECT_NAME}
     ${GTSAM_INCLUDE_DIR}
     $<BUILD_INTERFACE:${CMAKE_CURRENT_LIST_DIR}/include>
     $<INSTALL_INTERFACE:include>
+    ${TORCH_INCLUDE_DIRS}
 )
 
 target_compile_options(${PROJECT_NAME}
   PRIVATE -Wall -pipe
   PRIVATE -march=native
 )
+
+set(CMAKE_CXX_STANDARD 14)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # We would just need to say cxx_std_11 if we were using cmake 3.8
 target_compile_features(${PROJECT_NAME} PUBLIC
@@ -156,6 +162,10 @@ add_library(kimera_vio::kimera_vio ALIAS kimera_vio)
 
 add_executable(stereoVIOEuroc ./examples/KimeraVIO.cpp)
 target_link_libraries(stereoVIOEuroc PUBLIC kimera_vio::kimera_vio)
+set_property(TARGET ${PROJECT_NAME} PROPERTY CXX_STANDARD 14)
+set_property(TARGET ${PROJECT_NAME} PROPERTY CXX_STANDARD_REQUIRED ON)
+set_property(TARGET stereoVIOEuroc PROPERTY CXX_STANDARD 14)
+set_property(TARGET stereoVIOEuroc PROPERTY CXX_STANDARD_REQUIRED ON)
 
 ############################### TESTS ##########################################
 ### Add testing

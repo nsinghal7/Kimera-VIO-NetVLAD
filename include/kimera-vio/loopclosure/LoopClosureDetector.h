@@ -33,6 +33,8 @@
 #include "kimera-vio/pipeline/PipelineModule.h"
 #include "kimera-vio/utils/ThreadsafeQueue.h"
 
+#include "kimera-vio/loopclosure/netvlad.h"
+
 /* ------------------------------------------------------------------------ */
 // Forward declare KimeraRPGO, a private dependency.
 namespace KimeraRPGO {
@@ -358,12 +360,14 @@ class LoopClosureDetector {
 
   // BoW and Loop Detection database and members
   std::unique_ptr<OrbDatabase> db_BoW_;
+  std::unique_ptr<cpp_netvlad::NetVLAD> db_vlad_;
   std::vector<LCDFrame> db_frames_;
   FrameIDTimestampMap timestamp_map_;
 
   // Store latest computed objects for temporal matching and nss scoring
   LcdThirdPartyWrapper::UniquePtr lcd_tp_wrapper_;
   DBoW2::BowVector latest_bowvec_;
+  at::Tensor latest_vlad_;
 
   // Store camera parameters and StereoFrame stuff once
   gtsam::Pose3 B_Pose_camLrect_;

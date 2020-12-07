@@ -4,4 +4,5 @@ target_sources(kimera_vio
     "${CMAKE_CURRENT_LIST_DIR}/LoopClosureDetector.cpp"
     "${CMAKE_CURRENT_LIST_DIR}/LcdThirdPartyWrapper.cpp"
     "${CMAKE_CURRENT_LIST_DIR}/LoopClosureDetectorParams.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/netvlad.cpp"
 )
