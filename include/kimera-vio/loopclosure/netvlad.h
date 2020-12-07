@@ -13,6 +13,7 @@ class NetVLAD {
 private:
  std::vector<at::Tensor> database_;
  torch::jit::script::Module script_net_;
+ torch::NoGradGuard grad_guard_;
 
 public:
  NetVLAD(std::string checkpoint_path);

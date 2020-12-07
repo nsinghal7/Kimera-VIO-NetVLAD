@@ -11,7 +11,7 @@ namespace cpp_netvlad {
 constexpr int FULL_VECTOR_SIZE = 32768;
 constexpr auto DTYPE = at::kFloat;
 
-NetVLAD::NetVLAD(std::string checkpoint_path) {
+NetVLAD::NetVLAD(std::string checkpoint_path): grad_guard_() {
   try {
     // Load TorchScript trace of PyTorch implementation of NetVLAD based on https://github.com/Nanne/pytorch-NetVlad
     script_net_ = torch::jit::load(checkpoint_path);
