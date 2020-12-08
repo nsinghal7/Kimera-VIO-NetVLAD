@@ -304,7 +304,7 @@ bool LoopClosureDetector::detectLoop(const StereoFrame& stereo_frame,
                     query_result,
                     lcd_params_.max_db_results_,
                     max_possible_match_id);
-    db_vlad_->add(vlad);
+    db_vlad_->add(vlad, frame_id);
   } else {
     // Create BOW representation of descriptors.
     DCHECK(db_BoW_);

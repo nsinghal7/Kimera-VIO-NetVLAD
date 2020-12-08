@@ -5,6 +5,7 @@
 #include <glog/logging.h>
 #include <algorithm>
 #include <utility>
+#include "kimera-vio/utils/Timer.h"
 
 namespace cpp_netvlad {
 
@@ -16,6 +17,7 @@ NetVLAD::NetVLAD(std::string checkpoint_path): grad_guard_() {
     // Load TorchScript trace of PyTorch implementation of NetVLAD based on https://github.com/Nanne/pytorch-NetVlad
     script_net_ = torch::jit::load(checkpoint_path);
     script_net_.to(DTYPE); // conversion probably not necessary, but will avoid errors
+    script_net_.eval();
   } catch (const c10::Error& e) {
     LOG(FATAL) << "Failed to load NetVLAD model.";
   }
@@ -23,6 +25,7 @@ NetVLAD::NetVLAD(std::string checkpoint_path): grad_guard_() {
 }
 
 void NetVLAD::transform(const cv::Mat& img, at::Tensor& rep) {
+  auto tic = VIO::utils::Timer::tic();
   // Assert that the returned tensor is normalized and detached
   std::vector<torch::jit::IValue> inputs;
   // Interprets the raw mono8 image data as a 1xRxC matrix of bytes (uint8)
@@ -46,28 +49,33 @@ void NetVLAD::transform(const cv::Mat& img, at::Tensor& rep) {
   // TODO: determine an appropriate PCA reduction for output tensor to avoid storing 16MB per image
 
   rep = output.squeeze();
+  auto duration = VIO::utils::Timer::toc(tic);
+  LOG(WARNING) << "NetVLAD transform took " << duration.count() << "ms";
 }
 void NetVLAD::query(const at::Tensor& query, DBoW2::QueryResults& query_results,
                     const int max_results, const int max_id) const {
+  auto tic = VIO::utils::Timer::tic();
   // TODO: check if this is slow and maybe use a heap, since we have to significantly reduce the number of results while checking *all* images
   query_results.clear();
   query_results.reserve(database_.size());
-  int i = 0;
-  for(auto it = database_.begin(); it != database_.end(); it++, i++) {
-    if(i >= max_id) {
+  for(auto it = database_.begin(); it != database_.end(); it++) {
+    if(it->first >= max_id) {
       // Following example of DBoW2, we throw away all ids unless < max_id
       break;
     }
-    query_results.emplace_back(i, score(query, *it));
+    query_results.emplace_back(it->first, score(query, it->second));
   }
   std::sort(query_results.rbegin(), query_results.rend()); // Sort query_results in reverse so it ends up descending
   
   if(query_results.size() > max_results) {
     query_results.resize(max_results);
   }
+  auto duration = VIO::utils::Timer::toc(tic);
+  LOG(WARNING) << "NetVLAD query took " << duration.count() << "ms";
+  LOG(WARNING) << "NetVLAD query scores: " << ((query_results.size() > 0) ? query_results[0].Score : -2.) << " " << ((query_results.size() > 1) ? query_results[1].Score : -2);
 }
-void NetVLAD::add(const at::Tensor& rep) {
-  database_.push_back(rep);
+void NetVLAD::add(const at::Tensor& rep, const unsigned int id) {
+  database_.insert(database_.end(), std::make_pair(id, rep));
 }
 double NetVLAD::score(const at::Tensor& rep1, const at::Tensor& rep2) const {
   // Can assume that tensors are normalized, so Euclidean norm^2 is in [0, 2], with 0 best.
