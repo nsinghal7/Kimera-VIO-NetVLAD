@@ -12,6 +12,8 @@
 
 # Kimera-VIO: Open-Source Visual Inertial Odometry
 
+Modifications by nmsinghal7: added pytorch netvlad model extracted from https://github.com/Nanne/pytorch-NetVlad, and integrated into Kimera. Fixed several bugs in Kimera loop closure system, many of which were apparently being worked on internally at the same time.
+
 [![Build Status](http://ci-sparklab.mit.edu:8080/job/MIT-SPARK-Kimera/job/master/badge/icon)](http://ci-sparklab.mit.edu:8080/job/MIT-SPARK-Kimera/job/master/)
 For evaluation plots, check our [jenkins server](http://ci-sparklab.mit.edu:8080/job/MIT-SPARK-Kimera/job/master/VIO_20Euroc_20Performance_20Report).
 
